@@ -1,3 +1,23 @@
+/*
+The KTRO Virtual Machine 
+This machine can compile KTRO Packages to run with JS.
+
+* CURRENTLY SUPPORTS 8-BIT PROGRAMS
+* PROJECT WILL BE FINISHED & READY IN 2024
+
+* Todo:
+  - Add support for signed numbers
+  - Add support for 16, 32, and 64 bit ints,
+  - Add support for 32 and 64 bit floats,
+  - Add a data section
+  - Ability to call standard library functions
+  - Jumps and functions
+  - Entry function
+  - Support some Javascript libs like WebGL, Express, etc
+
+As of now, only use bin type 0xA1 as its the only supported bin type.
+*/
+
 const fs = require('fs');
 
 const PackageProgram = (output, program) => {
@@ -98,6 +118,17 @@ class KtroVirtualMachine {
     this.current_step = 0;
   }
 
+  exportAsFunction(program) {
+    return (...args) => {
+      this.step_debug = false;
+      for (let i = 0; i < args.length; i++) {
+        const addr = this.offsetAsHeapAddress(i);
+        this.heapStoreImm8(addr, args[i]);
+      }
+      return this.run();
+    }
+  }
+  
   useDebugger() {
     this.step_debug = true;
   }
@@ -227,16 +258,22 @@ class KtroVirtualMachine {
     }
     var value;
     switch (size) {
-      case 8: value = this.memory.getUint8(topOfStack); break;
-      case 16: value = this.memory.getUint16(topOfStack); break;
-      case 32: value = this.memory.getUint32(topOfStack); break;
+      case 8: {
+        value = this.memory.getUint8(topOfStack);
+        this.memory.setUint8(topOfStack, 0);
+        break;
+      }
+      case 16: {
+        value = this.memory.getUint16(topOfStack);
+        this.memory.setUint8(topOfStack, 0);
+        break;
+      }
+      case 32: {
+        value = this.memory.getUint32(topOfStack);
+        this.memory.setUint32(topOfStack, 0);
+        break;
+      }
       default: console.error(`pop (retrieve): Invalid size '${size}'`);
-    }
-    switch (size) {
-      case 8: this.memory.setUint8(topOfStack, 0); break;
-      case 16: this.memory.setUint16(topOfStack, 0); break;
-      case 32: this.memory.setUint32(topOfStack, 0); break;
-      default: console.error(`pop (free): Invalid size '${size}'`);
     }
     this.setRegister("rsp", topOfStack);
     return value;
@@ -252,6 +289,7 @@ class KtroVirtualMachine {
         this.BIN_TYPE = this.fetch();
         return;
       }
+
       case CONST: {
         const size = this.fetch();
         const value = this.fetchBySize(size);
