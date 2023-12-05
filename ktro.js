@@ -2,12 +2,11 @@
 The KTRO Virtual Machine 
 This machine can compile KTRO Packages to run with JS.
 
-* CURRENTLY SUPPORTS 8-BIT PROGRAMS
 * PROJECT WILL BE FINISHED & READY IN 2024
 
 * Todo:
   - Add support for signed numbers
-  - Add support for 16, 32, and 64 bit ints,
+  - Add support for 32 and 64 bit ints,
   - Add support for 32 and 64 bit floats,
   - Add a data section
   - Ability to call standard library functions
@@ -21,19 +20,12 @@ As of now, only use bin type 0xA1 as its the only supported bin type.
 const fs = require('fs');
 
 const PackageProgram = (output, program) => {
-  return fs.writeFile(output, new Uint8Array(Buffer.from(program)), (err) => {
-    if (err) return err;
-    return 0;
-  });
+  return fs.writeFileSync(output, Buffer.from(program));
 }
 
 
 const FromPackage = (package) => {
-  return new Uint8Array(
-    Buffer.from(
-      fs.readFileSync(package, "binary")
-    )
-  );
+  return Uint8Array.from(fs.readFileSync(package));
 }
 
 const VirtualMemoryBuffer = sizeInBytes => {
@@ -42,8 +34,14 @@ const VirtualMemoryBuffer = sizeInBytes => {
   return dv;
 };
 
+const STEP_DEBUGGER = 0x0A;
+const BRANCH_DEBUGGER = 0x1A;
+
+
 const NOP = 0x00;
 const BINARY = 0x01;
+const INTERRUPT = 0x02;
+const META = 0x03;
 
 const CONST = 0x10;
 const ADD = 0x11;
@@ -56,16 +54,48 @@ const CMPGE = 0x17;
 const CMPLE = 0x18;
 const CMAEQ = 0x19;
 const CMANE = 0x20;
-const STO = 0x1A;
-const LLC = 0x2A;
-const LGB = 0x3A;
-const POPL = 0x4A;
-const DEL = 0x5A;
+
+const STO = 0x0A;
+const LDS = 0x1A;
+const POPL = 0x2A;
+const DEL = 0x3A;
+const STSRZ = 0x4A;
+const LLSRZ = 0x5A;
+const LDA = 0x6A;
+const LDAZ = 0x7A;
+const HLTS = 0x8A;
+const HLTF = 0x9A;
+const SUB = 0xAA;
+const MUL = 0xBA;
+const DIV = 0xCA;
+const FLR = 0xDA;
+
+const CEIL = 0xEA;
+const RDIV = 0xFA;
+const INC = 0x0B;
+const DEC = 0x1B;
+const MOD = 0x2B;
+const POW = 0x3B;
+const SQRT = 0x4B;
+const JMP = 0x5B;
+const JE = 0x6B;
+const JNE = 0x7B;
+const JZE = 0x8B;
+const CZF = 0x9B;
+const CAF = 0xAB;
+const JPRA = 0xBB;
+const JPR = 0xCB;
+const JER = 0xDB;
+const JNR = 0xEC;
+const JZR = 0xFC;
+const JERA = 0x0C;
+const JNRA = 0x1C;
+const JZRA = 0x2C;
+
 
 const U8 = 8;
 const U16 = 16;
 const U32 = 32;
-
 
 class KtroVirtualMachine {
   constructor(memory, buffer) {
@@ -75,6 +105,13 @@ class KtroVirtualMachine {
     0xA2 = INLINE ENTRY
     0xF1 = PACKAGE
     0xF2 = PACKAGE NO ENTRY
+    */
+    /*
+    META TYPES
+    0x00 = NO METADATA
+    0x1F = FCR (Flag Compare Results) 
+          | Instead of pushing the truthy value to the stack,
+          | It sets the Zero Flag instead.
     */
     this.BIN_TYPE = 0xA1
 
@@ -87,6 +124,10 @@ class KtroVirtualMachine {
 
     this.MAX_ITERATIONS = buffer.length + 10;
     this.step_debug = false;
+    this.branch_debug = false;
+
+    this.USE_FLAGS = false;
+    this.ZERO_FLAG = false;
 
     this.registerNames = [
       "rtp", "rsp",
@@ -97,7 +138,6 @@ class KtroVirtualMachine {
       "r04", "r03",
       "r02", "r01",
     ];
-
     this.registers = VirtualMemoryBuffer(this.registerNames.length * 2);
 
     this.registerMap = this.registerNames.reduce((map, name, i) => {
@@ -111,11 +151,24 @@ class KtroVirtualMachine {
     this.setRegister("rtp", 0x0);
     for (let i = 0; i < buffer.length; i++) {
       this.memory.setUint8(i + this.MEMORY_START, buffer[i]);
+      //console.log(buffer[i]);
     }
+
 
     this.halt = false;
     this.exit_code = 0;
     this.current_step = 0;
+  }
+
+  addMetaData(code) {
+    switch (code) {
+      case 0x00: return;
+      case 0x1F: {
+        this.USE_FLAGS = true;
+        return;
+      }
+    }
+    return;
   }
 
   exportAsFunction(program) {
@@ -128,22 +181,49 @@ class KtroVirtualMachine {
       return this.run();
     }
   }
-  
-  useDebugger() {
-    this.step_debug = true;
+
+  useDebugger(_debugger) {
+    switch (_debugger) {
+      case STEP_DEBUGGER: this.step_debug = true; return;
+      case BRANCH_DEBUGGER: this.branch_debug = true; return;
+    }
+    return;
   }
 
+
   debug() {
-    if (!this.step_debug) return;
-    console.log(`step: ${this.current_step + 1}`);
-    console.log(`stack ptr: ${this.getRegister("rsp")}`)
-    console.log("stack snapshot:");
-    for (let i = this.STACK_BASE; i >= 0; i--) {
-      let value = this.memory.getUint8(i);
-      console.log(`${i}: ${value}`);
-      if (value == 0) break
+    if (this.branch_debug) {
+      console.log(`step (${this.current_step + 1}) | instruction ptr: ${this.getRegister("rip")}`);
+      return;
     }
-    console.log("");
+    if (this.step_debug) {
+      console.log(`step: ${this.current_step + 1}`);
+      console.log(`stack ptr: ${this.getRegister("rsp")}`);
+      console.log(`flags (${(this.USE_FLAGS) ? 'y' : 'n'}): |Z: ${this.ZERO_FLAG}|`)
+      console.log("stack snapshot:");
+      for (let i = this.STACK_BASE; i >= 0; i--) {
+        let value = this.memory.getUint8(i);
+        console.log(`${i}: ${value}`);
+        if (value == 0) break
+      }
+      console.log("");
+      return;
+    }
+  }
+
+  lastResultTruthy() {
+    if (this.USE_FLAGS) {
+      return this.ZERO_FLAG === true;
+    }
+    return this.pop(8) === 1;
+  }
+
+  compareResult(res) {
+    if (this.USE_FLAGS) {
+      this.ZERO_FLAG = res;
+      return;
+    }
+    this.push(8, res);
   }
 
   offsetAsHeapAddress(offset) {
@@ -239,19 +319,19 @@ class KtroVirtualMachine {
   }
 
   push(size, value) {
-    const topOfStack = this.getRegister("rsp");
+    const topOfStack = this.getRegister("rsp") - (size / 8);
     switch (size) {
       case 8: this.memory.setUint8(topOfStack, value); break;
       case 16: this.memory.setUint16(topOfStack, value); break;
       case 32: this.memory.setUint32(topOfStack, value); break;
       default: console.error(`push: Invalid size '${size}' (value ${value})`);
     }
-    this.setRegister("rsp", topOfStack - (size / 8))
+    this.setRegister("rsp", topOfStack)
     return;
   }
 
   pop(size) {
-    let topOfStack = this.getRegister("rsp") + (size / 8);
+    let topOfStack = this.getRegister("rsp");
     if (topOfStack >= this.STACK_BASE) {
       this.setRegister("rsp", this.STACK_BASE);
       topOfStack = this.getRegister("rsp");
@@ -265,7 +345,7 @@ class KtroVirtualMachine {
       }
       case 16: {
         value = this.memory.getUint16(topOfStack);
-        this.memory.setUint8(topOfStack, 0);
+        this.memory.setUint16(topOfStack, 0);
         break;
       }
       case 32: {
@@ -275,13 +355,75 @@ class KtroVirtualMachine {
       }
       default: console.error(`pop (retrieve): Invalid size '${size}'`);
     }
-    this.setRegister("rsp", topOfStack);
+    this.setRegister("rsp", topOfStack + (size / 8));
     return value;
   }
 
   execute(instruction) {
     switch (instruction) {
       case NOP: {
+        return;
+      }
+
+      case META: {
+        const data = this.fetch();
+        this.addMetaData(data);
+        return;
+      }
+
+      case CZF: {
+        this.ZERO_FLAG = 0;
+        return;
+      }
+
+      case CAF: {
+        this.ZERO_FLAG = 0;
+        return;
+      }
+
+      case JMP: {
+        const addr = this.fetch();
+        this.setRegister("rip", addr);
+        return;
+      }
+
+      case JPRA: {
+        const addr = this.fetch();
+        const rip = this.getRegister("rip");
+        this.setRegister("rip", rip + addr);
+        return;
+      }
+
+      case JPR: {
+        const addr = this.fetch();
+        const rip = this.getRegister("rip");
+        this.setRegister("rip", rip - addr);
+        return;
+      }
+
+      case JZE: {
+        const addr = this.fetch();
+        if (this.lestResultTruthy()) {
+          this.setRegister("rip", addr);
+        }
+        return;
+      }
+
+      case JER: {
+        const addr = this.fetch();
+        if (this.lastResultTruthy()) {
+          const rip = this.getRegister("rip");
+          this.setRegister("rip", rip - addr);
+        }
+        return;
+      }
+
+      case JERA: {
+        const addr = this.fetch();
+        if (this.lastResultTruthy()) {
+          const rip = this.getRegister("rip");
+          this.setRegister("rip", rip + addr);
+        }
         return;
       }
 
@@ -293,14 +435,17 @@ class KtroVirtualMachine {
       case CONST: {
         const size = this.fetch();
         const value = this.fetchBySize(size);
+
         this.push(size, value);
         return;
       }
+
       case POPL: {
         const size = this.fetch();
         this.pop(size);
         return;
       }
+
       case STO: {
         const size = this.fetch();
         const offset = this.fetch();
@@ -310,7 +455,7 @@ class KtroVirtualMachine {
         return;
       }
 
-      case LLC: {
+      case LDS: {
         const size = this.fetch();
         const offset = this.fetch();
         const address = this.offsetAsHeapAddress(offset);
@@ -318,6 +463,7 @@ class KtroVirtualMachine {
         this.push(size, value);
         return;
       }
+
       case DEL: {
         const size = this.fetch();
         const offset = this.fetch();
@@ -327,7 +473,8 @@ class KtroVirtualMachine {
       }
 
       case HLT: {
-        const exit_code = this.pop(U8);
+        const size = this.fetch();
+        const exit_code = this.pop(size);
         this.exit_code = exit_code;
         this.halt = true;
         return;
@@ -347,7 +494,7 @@ class KtroVirtualMachine {
         const left = this.pop(size);
         const right = this.pop(size);
         const res = left === right;
-        this.push(8, res);
+        this.compareResult(res);
         return;
       }
 
@@ -356,7 +503,7 @@ class KtroVirtualMachine {
         const left = this.pop(size);
         const right = this.pop(size);
         const res = left !== right;
-        this.push(8, res);
+        this.compareResult(res);
         return;
       }
     }
@@ -397,6 +544,8 @@ const KtroInstance = (memory, buffer) => {
 }
 
 module.exports = {
+  STEP_DEBUGGER,
+  BRANCH_DEBUGGER,
   KtroInstance,
   VirtualMemoryBuffer,
   PackageProgram,
@@ -413,13 +562,28 @@ module.exports = {
   CMAEQ,
   CMANE,
   STO,
-  LLC,
-  LGB,
+  LDA,
+  LDS,
   POPL,
   DEL,
   NOP,
   BINARY,
-
+  META,
+  JMP,
+  JE,
+  JNE,
+  JZE,
+  JPR,
+  JPRA,
+  JER,
+  JERA,
+  JNR,
+  JNRA,
+  JZR,
+  JZRA,
+  CZF,
+  CAF,
+  
   U8,
   U16,
   U32,
