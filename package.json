@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -11,7 +12,16 @@
   "license": "ISC",
   "dependencies": {
     "@types/node": "^18.0.6",
+    "blessed": "^0.1.81",
+    "clui": "^0.3.6",
+    "express": "^4.18.2",
+    "inquirer": "^9.2.12",
     "node-fetch": "^3.2.6",
+    "parcel": "^2.10.3",
+    "readline-sync": "^1.4.10",
     "wabt": "^1.0.32"
+  },
+  "devDependencies": {
+    "buffer": "^6.0.3"
   }
 }

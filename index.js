@@ -5,35 +5,27 @@ For examples, go to examples.js
 This file is used for debugging & testing.
 */
 
-const { PackageProgram, KtroInstance, VirtualMemoryBuffer, LDS, CONST, U8, U16, CMPEQ, ADD, HLT, STO, POPL, FromPackage, DEL, BINARY, META, JPR, JPRA, JERA, JZRA, BRANCH_DEBUGGER, STEP_DEBUGGER } = require("./ktro");
+import * as readlineSync  from "readline-sync";
 
-const bytes = [
-  BINARY, 0xA1,
-  META, 0x1F,
-  CONST, U8, 69,
-  HLT, U8
-];
+import * as exports from "./ktro.js"
+Object.entries(exports).forEach(([name, exported]) => global[name] = exported);
 
-saveProgram(bytes);
-// Wait for program to save to file
-setTimeout(runProgram, 1000);
+const bytes = FromPackage("./a.pkg");
+const instance = KtroInstance(
+  VirtualMemoryBuffer(1024 * 1024),
+  bytes
+);
 
-function saveProgram(programBytes) {
-  console.log("Saving Program...")
-  PackageProgram("test.pkg", programBytes);
-}
+instance.addNamespace({
+  namespaceID: 0,
+  jsFunctions: [
+    (handle) => {
+      const arg = handle.getArgument(U8);
+      print(handle.heapLoad8(handle.offsetAsHeapAddress(arg)))
+      handle.externInterrupt(1, [arg]);
+    }
+  ]
+})
 
-function runProgram() {
-  console.clear();
-
-  program = FromPackage('test.pkg');
-
-  const instance = KtroInstance(
-    VirtualMemoryBuffer(1024 * 1024),
-    program
-  );
-  const exitCode = instance.run();
-  console.info(`exit: ${exitCode}`);
-  process.exit(exitCode);
-}
-// -------------------------------------------
+let code = instance.run();
+console.log(`finished: ${code}`);
