@@ -6,26 +6,45 @@ This file is used for debugging & testing.
 */
 
 import * as readlineSync  from "readline-sync";
-
 import * as exports from "./ktro.js"
 Object.entries(exports).forEach(([name, exported]) => global[name] = exported);
 
-const bytes = FromPackage("./a.pkg");
-const instance = KtroInstance(
+let bytes = FromPackage("./a.pkg");
+let instance = KtroInstance(
   VirtualMemoryBuffer(1024 * 1024),
   bytes
 );
+let exitCode = instance.run();
 
-instance.addNamespace({
+let namespace = {
   namespaceID: 0,
   jsFunctions: [
-    (handle) => {
-      const arg = handle.getArgument(U8);
-      print(handle.heapLoad8(handle.offsetAsHeapAddress(arg)))
-      handle.externInterrupt(1, [arg]);
-    }
+    (kvm) => {
+      let num = kvm.getArgument(U8);
+      console.log(num);
+    },
   ]
-})
-
-let code = instance.run();
-console.log(`finished: ${code}`);
+};
+console.clear();
+console.log("interactive ktro bytecode runner\ncmds: run/reload/exit")
+readlineSync.promptCLLoop({
+  reload: function() {
+    bytes = FromPackage("./a.pkg");
+    instance = KtroInstance(
+      VirtualMemoryBuffer(1024 * 1024),
+      bytes
+    );
+    instance.addNamespace(namespace);
+  },
+  
+  run: function() {
+    instance.reset(bytes);
+    instance.addNamespace(namespace);
+    let exit = instance.run();
+    console.log(`exit code: ${exit}`);
+    
+  },
+  clear: function() { console.clear() },
+  exit: function() { process.exit(0); }
+});
+console.log('Exited');

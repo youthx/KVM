@@ -19,15 +19,20 @@ As of now, only use bin type 0xA1 as its the only supported bin type.
 
 import { executionAsyncResource } from "async_hooks";
 import * as fs from "fs";
-import blessed from "blessed";
-const termgl = blessed;
 
 export const PackageProgram = (output, program) => {
   return fs.writeFileSync(output, Buffer.from(program));
 };
 
 export const FromPackage = (p) => {
-  return Uint8Array.from(fs.readFileSync(p));
+  try {
+    const buffer = fs.readFileSync(p);
+    return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.length);
+  } catch (error) {
+    // Handle read file error
+    console.error("Error reading file:", error);
+    return null;
+  }
 };
 
 export const chr = (c) => c.charCodeAt(0);
@@ -70,8 +75,7 @@ export const STO = 0x0a;
 export const LDS = 0x1a;
 export const POPL = 0x2a;
 export const DEL = 0x3a;
-export const STSRZ = 0x4a;
-export const LLSRZ = 0x5a;
+export const DUP = 0x4a;
 export const LDR = 0x6a;
 export const LDAZ = 0x7a;
 export const HLTS = 0x8a;
@@ -95,13 +99,13 @@ export const JZE = 0x8b;
 export const CZF = 0x9b;
 export const CAF = 0xab;
 export const OFFSET = 0xbb;
-export const JPR = 0xcb;
-export const JER = 0xdb;
-export const JNR = 0xec;
-export const JZR = 0xfc;
-export const JERA = 0x0c;
-export const JNRA = 0x1c;
-export const JZRA = 0x2c;
+export const AND = 0xcb;
+export const OR = 0xdb;
+export const SHL = 0xec;
+export const SHR = 0xfc;
+export const XOR = 0x0c;
+export const NOT = 0x1c;
+export const NOR = 0x2c;
 export const CALL = 0x4c;
 export const RET = 0x5c;
 
@@ -118,6 +122,8 @@ export const SYSINT = {
 
 export class KtroPreproccessor {
   constructor(buffer, mem_start) {
+    this.buffer = buffer;
+    this.mem_start = mem_start;
     this.program = buffer;
     this.program_length = buffer.length;
     this.address_offset = mem_start;
@@ -137,7 +143,6 @@ export class KtroPreproccessor {
     this.entry_declared = false;
     this.current_section;
   }
-
   back() {
     if (this.pointer <= 0) {
       return this.current;
@@ -178,6 +183,8 @@ export class KtroPreproccessor {
     }
   }
   function() {
+    if (this.next() != 0xfa) return;
+
     const id = this.next();
     let func = {
       address: this.current_address + 1,
@@ -188,6 +195,8 @@ export class KtroPreproccessor {
   }
 
   label() {
+    if (this.next() != 0xfa) return;
+
     const id = this.next();
     let label = {
       address: this.current_address + 1,
@@ -210,6 +219,9 @@ export class KtroPreproccessor {
   }
 
   preproccess() {
+    this.next();
+    this.next();
+    this.next();
     while (!this.finished) {
       if (this.current_section === 0) {
         switch (this.current) {
@@ -266,14 +278,14 @@ export class KtroVirtualMachine {
           | It sets the Zero Flag instead.
     */
     this.memory = memory;
-
+    this.buffer = buffer;
     this.MEMORY_START = 0xfff + 1;
     this.MEMORY_END = this.memory.length;
-    this.HEAP_START = this.MEMORY_START + buffer.length;
-    this.HEAP_MAX = this.memory.length - (0xfff + 1);
+    this.HEAP_START = this.MEMORY_START + buffer.length + 0xff;
+    this.HEAP_MAX = this.memory.length;
     this.STACK_BASE = 0xfff;
 
-    this.MAX_ITERATIONS = buffer.length * 10;
+    this.MAX_ITERATIONS = buffer.length * 0xffff;
     this.step_debug = false;
     this.branch_debug = false;
     this.inst_debug = false;
@@ -323,7 +335,6 @@ export class KtroVirtualMachine {
       console.error("kvm: execution failed");
       return this.preprocess_result;
     }
-
     this.functions = this.preproccesor.functions;
     this.labels = this.preproccesor.labels;
     this.func_entry = 0;
@@ -347,7 +358,63 @@ export class KtroVirtualMachine {
     this.exit_code = 0;
     this.current_step = 0;
     this.pause_execution = false;
-    this.saved_rip = this.MEMORY_START;
+    this.saved_rips = [];
+  }
+
+  reset(buffer) {
+    this.MEMORY_START = 0xfff + 1;
+    this.MEMORY_END = this.memory.length;
+    this.HEAP_START = this.MEMORY_START + buffer.length + 0xff;
+    this.HEAP_MAX = this.memory.length;
+    this.STACK_BASE = 0xfff;
+
+    this.MAX_ITERATIONS = buffer.length * 0xffff;
+    this.step_debug = false;
+    this.branch_debug = false;
+    this.inst_debug = false;
+
+    this.USE_FLAGS = false;
+    this.ZERO_FLAG = false;
+    this.NEG_FLAG = false;
+
+    this.STDOUT = 0;
+    this.STDIN = 1;
+
+    this.setRegister("rhp", this.HEAP_START);
+    this.setRegister("rip", this.MEMORY_START);
+    this.setRegister("rsp", this.STACK_BASE);
+    this.setRegister("rtp", 0x0);
+
+    this.preproccesor = new KtroPreproccessor(buffer, this.MEMORY_START);
+    this.preprocess_result = this.preproccesor.preproccess();
+    if (this.preprocess_result != 0) {
+      console.error("kvm: execution failed");
+      return this.preprocess_result;
+    }
+    this.functions = this.preproccesor.functions;
+    this.labels = this.preproccesor.labels;
+    this.func_entry = 0;
+    this.bin_type = this.preproccesor.bintype;
+    this.externs = [];
+    this.setBinaryType(this.preproccesor.bintype);
+
+    this.preproccesor.metadata.forEach((meta) => {
+      this.addMetaData(meta);
+    });
+    this.steps = 0;
+
+    for (let i = 0; i < buffer.length; i++) {
+      this.memory.setUint8(i + this.MEMORY_START, buffer[i]);
+      //console.log(buffer[i]);
+    }
+
+    this.current_function = null;
+
+    this.halt = false;
+    this.exit_code = 0;
+    this.current_step = 0;
+    this.pause_execution = false;
+    this.saved_rips = [];
   }
 
   addNamespace({ namespaceID, jsFunctions }) {
@@ -461,9 +528,9 @@ export class KtroVirtualMachine {
 
   lastResultTruthy() {
     if (this.USE_FLAGS) {
-      return this.ZERO_FLAG === 1;
+      return this.ZERO_FLAG;
     }
-    return this.pop(8) === 1;
+    return this.heapLoad8(this.getRegister("rsp"));
   }
 
   compareResult(res) {
@@ -618,28 +685,42 @@ export class KtroVirtualMachine {
     const m = (mode & 0b100) >> 2; // M
     const b = (mode & 0b010) >> 1; // B
     const x = mode & 0b001; // X
-    let res = (m === 1) ? "w" : "r";
-    res += (b === 1) ? "b" : "";
-    res += (x === 1) ? "+" : "";
+    let res = m === 1 ? "w" : "r";
+    res += b === 1 ? "b" : "";
+    res += x === 1 ? "+" : "";
     return res;
   }
-  
+
   interrupt() {
     const code = this.fetch();
     switch (code) {
+      case 0: {
+        const stream = this.fetch();
+        const fp = this.loadBufferFromHeap(stream);
+        const outputOffset = this.fetch();
+        const addr = this.offsetAsHeapAddress(outputOffset);
+
+        const buf = fs.readFileSync(fp);
+        let i = 0;
+        buf.forEach((b) => {
+          this.heapStoreAuto(8, addr + i, b);
+          i += 1;
+        });
+        return;
+      }
       case 1: {
         const stream = this.fetch();
         let fp = "";
         if (stream > 0) {
           fp = this.loadBufferFromHeap(stream);
-        } 
+        }
         const offset = this.fetch();
         let text = this.loadBufferFromHeap(offset);
         if (fp == "") process.stdout.write(text);
         else {
-          fs.writeFileSync(fp,text);
+          fs.writeFileSync(fp, text);
         }
-        
+
         return;
       }
     }
@@ -721,6 +802,30 @@ export class KtroVirtualMachine {
         return;
       }
 
+      case INC: {
+        const size = this.fetch();
+        const item = this.pop(size);
+        this.push(size, item + 1);
+        return;
+      }
+
+      case DEC: {
+        const size = this.fetch();
+        const item = this.pop(size);
+        this.push(size, item + 1);
+        return;
+      }
+
+      case DUP: {
+        const size = this.fetch();
+        const times = this.fetch();
+        const item = this.heapLoadAuto(size, this.getRegister("rsp"));
+        for (let i = 0; i < times; i++) {
+          this.push(size, item);
+        }
+        return;
+      }
+
       case EXTERN: {
         const namespace = this.fetch();
         const id = this.fetch();
@@ -738,13 +843,13 @@ export class KtroVirtualMachine {
           this.error(`cannot find function ${id}`);
           return;
         }
-        this.saved_rip = this.getRegister("rip");
+        this.saved_rips.push(this.getRegister("rip"));
         this.setRegister("rip", func.address);
         return;
       }
 
       case RET: {
-        this.setRegister("rip", this.saved_rip);
+        this.setRegister("rip", this.saved_rips.pop());
         return;
       }
 
@@ -759,14 +864,18 @@ export class KtroVirtualMachine {
       }
 
       case JMP: {
-        const addr = this.getLabel(this.fetch());
+        const id = this.fetch();
+        const addr = this.getLabel(id);
+        if (addr == null) {
+          console.log(`error: cannot find label ${id}`);
+          return;
+        }
         this.setRegister("rip", addr.address);
         return;
       }
-
       case JZE: {
         const addr = this.getLabel(this.fetch());
-        if (this.lastResultTruthy()) {
+        if (this.lastResultTruthy() === 0) {
           this.setRegister("rip", addr.address);
         }
         return;
@@ -835,6 +944,60 @@ export class KtroVirtualMachine {
         return;
       }
 
+      case AND: {
+        const size = this.fetch();
+        const left = this.pop(size);
+        const right = this.pop(size);
+        const res = left & right;
+        this.push(size, res);
+        return;
+      }
+
+      case OR: {
+        const size = this.fetch();
+        const left = this.pop(size);
+        const right = this.pop(size);
+        const res = left | right;
+        this.push(size, res);
+        return;
+      }
+
+      case XOR: {
+        const size = this.fetch();
+        const left = this.pop(size);
+        const right = this.pop(size);
+        const res = left ^ right;
+        this.push(size, res);
+        return;
+      }
+
+      case NOR: {
+        const size = this.fetch();
+        const left = this.pop(size);
+        const right = this.pop(size);
+        const res = !(left | right);
+        this.push(size, res);
+        return;
+      }
+
+      case SHL: {
+        const size = this.fetch();
+        const left = this.pop(size);
+        const right = this.pop(size);
+        const res = left << right;
+        this.push(size, res);
+        return;
+      }
+
+      case SHR: {
+        const size = this.fetch();
+        const left = this.pop(size);
+        const right = this.pop(size);
+        const res = left >> right;
+        this.push(size, res);
+        return;
+      }
+
       case ADD: {
         const size = this.fetch();
         const left = this.pop(size);
@@ -862,6 +1025,15 @@ export class KtroVirtualMachine {
         return;
       }
 
+      case MOD: {
+        const size = this.fetch();
+        const left = this.pop(size);
+        const right = this.pop(size);
+        const sum = left & right;
+        this.push(size, sum);
+        return;
+      }
+
       case CMPEQ: {
         const size = this.fetch();
         const left = this.pop(size);
@@ -881,15 +1053,11 @@ export class KtroVirtualMachine {
       }
 
       case ASCIZ: {
-        for (; true; ) {
+        const size = this.fetch();
+        for (let i = 0; i < size; i++) {
           let byte = this.fetch();
-          if (byte === 0) {
-            this.heapStoreImm8(this.hoffset, byte);
-            this.hoffset += 1;
-            break;
-          }
           this.heapStoreImm8(this.hoffset, byte);
-          this.hoffset += 1
+          this.hoffset += 1;
         }
         return;
       }
@@ -904,7 +1072,7 @@ export class KtroVirtualMachine {
 
       case OFFSET: {
         const size = this.fetch();
-        this.hoffset += size
+        this.hoffset += size;
         return;
       }
       case INTERRUPT: {
@@ -952,7 +1120,7 @@ export class KtroVirtualMachine {
           this.error("cannot find entry");
           return;
         }
-        this.saved_rip = entry.address;
+        this.saved_rips.push(entry.address);
         this.setRegister("rip", entry.address);
         return;
       }

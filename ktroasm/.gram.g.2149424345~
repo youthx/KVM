@@ -18,17 +18,16 @@ dextern: ".extern" expr labeldecl? "(" (expr labeldecl?)* ")"
 dasciz: ".asciz" "(" (STRING | expr)+ ")" labeldecl?
 ddata: "(" ".data" ","? (expr ","?)+ ")" 
 dfunc: ".func" "(" expr labeldecl? ")" "(" inst* ".end" ")"
-dbyte: ".byte" expr labeldecl?
+dbyte: ".byte" expr labeldecl
 doffset: ".offset" expr labeldecl?
 
 ?inst: "(" inst ")"
-     | "%" expr ":" -> anon_label
-     | labeldecl ":" -> jmp_label 
      | (IDENTIFIER "." IDENTIFIER operand*) -> inst_typed
      | IDENTIFIER operand* -> inst_typeless
 
 ?operand: "(" operand ")"
        | expr             -> operand_imm
+       | "=" IDENTIFIER   -> operand_ref
        | "<"(expr | IDENTIFIER)"."(expr | IDENTIFIER)">" -> operand_extref
        
        
@@ -44,7 +43,6 @@ doffset: ".offset" expr labeldecl?
      | term "/" factor -> div
 
 ?factor: NUMBER -> number
-       | ("=" | "@" | ">") IDENTIFIER   -> operand_ref
        | CHAR   -> char
        | "(" expr ")"
 

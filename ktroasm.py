@@ -14,13 +14,17 @@ class Processor(Visitor):
     "load": 0x1a, "ld": 0x1a, "lds": 0x1a, "pop": 0x2a, "popl": 0x2a,
     "del": 0x3a, "sub": 0xaa, "mul": 0xba, "div": 0xca, "jmp": 0x5b,
     "jze": 0x8b, "jne": 0x8b, "call": 0x4c, "ret": 0x5c, "offset": 0xbb,
+    "and": 0xcb, "or": 0xdb, "shl": 0xec, "shr": 0xfc, "xor": 0x0c, 
+    "not": 0x1c, "nor": 0x2c, "inc": 0x0b, "dec": 0x1b, "dup": 0x4a,
+    "mod": 0x2b,
   }
   
   def __init__(self):
     super().__init__()
-    self.opcodes = bytearray([])
-    self.data_opcodes = bytearray([])
+    self.opcodes = [0x70, 0x6b, 0x67]
+    self.data_opcodes = []
     self.labels = {}
+    self.jmp_labels = 0
     self.heap_offset_ptr = 0
     
   def visit(self, tree: Tree):
@@ -43,7 +47,7 @@ class Processor(Visitor):
     self.opcodes.extend(new_opcodes)
 
   def package_to_file(self, path="./a", bits=32):
-    ops = bytes(self.opcodes)
+    ops = bytes(bytearray(self.opcodes))
     with open(f"{path}.pkg", "wb") as f:
       f.write(ops)
     return
@@ -94,7 +98,7 @@ class Processor(Visitor):
     label = None
     if isinstance(tree.children[-1], Token) and tree.children[-1].type == 'IDENTIFIER':
       label = str(tree.children[-1])
-    bytes = ["asciz"]
+    bytes = []
     for child in tree.children[:-1]:
       byte = str(self.visit(child))
       if byte[0] == '"':
@@ -103,11 +107,13 @@ class Processor(Visitor):
       if byte.startswith("0x"):
         byte = str(int(byte, 16))
       bytes.append(str(byte))
-    bytes.append(str(0x00))
+    bytes.extend(["0"])
+    
     if label:
-      self.labels[label] = self.heap_offset_ptr
-    self.heap_offset_ptr += len(bytes) - 1
-    self.emit_data(bytes)
+      self.labels[label] = self.heap_offset_ptr 
+    self.heap_offset_ptr += len(bytes)
+    opcodes = ["asciz", len(bytes), *bytes]
+    self.emit_data(opcodes)
 
   def inst_typed(self, tree: Tree):
     size = str(tree.children.pop(0))
@@ -141,17 +147,21 @@ class Processor(Visitor):
   def doffset(self, tree: Tree):
     align = int(str(self.visit(tree.children.pop(0))))
     label = None 
-    if isinstance(tree.children[0], Token) and tree.children[0].type == 'IDENTIFIER':
-      label = str(self.visit(tree.children.pop(0)))
-      self.labels[label] = self.heap_offset_ptr 
-    self.heap_offset_ptr += 1 
+    if len(tree.children) > 0:
+      if isinstance(tree.children[0], Token) and tree.children[0].type == 'IDENTIFIER':
+        label = str(self.visit(tree.children.pop(0)))
+        self.labels[label] = self.heap_offset_ptr 
+    self.heap_offset_ptr += align
     self.emit_data(["offset", align])
     return tree 
     
   def dbyte(self, tree: Tree):
-    lhs = str(self.visit(tree.children[0]))
-    self.heap_offset_ptr += 1
-    self.labels[lhs] = self.heap_offset_ptr
+    byte = int(str(self.visit(tree.children.pop(0))))
+    label = None 
+    if len(tree.children) > 0:
+      if isinstance(tree.children[0], Token) and tree.children[0].type == 'IDENTIFIER':
+        label = str(self.visit(tree.children.pop(0)))
+        self.labels[label] = byte
     return tree 
     
   def dfunc(self, tree: Tree): 
@@ -161,15 +171,30 @@ class Processor(Visitor):
       label = str(self.visit(tree.children.pop(0)))
       self.labels[label] = id 
 
-    self.emit(["func", id])
-    self.opcodes.extend(self.data_opcodes)
-    
+    self.emit(["func", 0xfa, id])
+    if id == 0:
+      self.emit(self.data_opcodes)
+
     for child in tree.children:
       self.visit(child)
       
     self.emit(["ret"])
     return tree
-  
+
+  def anon_label(self, tree: Tree):
+    to = str(self.visit(tree.children.pop(0)))
+    self.emit(["label", 0xfa, to])
+    return tree 
+    
+  def jmp_label(self, tree: Tree):
+    label = str(self.visit(tree.children.pop(0)))
+    self.labels[label] = self.jmp_labels
+    bytes = ["label", 0xfa, self.jmp_labels]
+    self.emit(bytes)
+    self.jmp_labels += 1
+    return tree
+    
+    
   def mul(self, tree: Tree):
     lhs = str(self.visit(tree.children[0]))
     rhs = str(self.visit(tree.children[1]))
@@ -215,6 +240,10 @@ class Processor(Visitor):
     return int(num)
     
 if __name__ == "__main__":
+  if (len(argv) < 2):
+    print(f"usage: {argv[0]} <file>")
+    exit(1)
+    
   gf = open("./ktroasm/gram.g", "r")
   grammar = gf.read()
   gf.close()
