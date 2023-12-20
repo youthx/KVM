@@ -9,50 +9,50 @@
   .byte 0xff $idx # points to address 0xff which olds the current index for the loop
   
   .func (0 $entry) (
-    u8.const 0
-    u8.sto =idx
+    i32.const 0
+    i32.sto =idx
     
     $loop:
-    u8.pop
-    u8.ld =idx
-    u8.const 3
-    u8.mod
-    u8.ld =idx
-    u8.const 5
-    u8.mod
-    u8.and
+    i32.pop
+    i32.ld =idx
+    i32.const 3
+    i32.mod
+    i32.ld =idx
+    i32.const 5
+    i32.mod
+    i32.and
     jze 2
     jmp 1
     %2:
     syscall 1 0 =fizzbuzzm
-    u8.ld =idx
-    u8.const 3
-    u8.mod
+    i32.ld =idx
+    i32.const 3
+    i32.mod
     jze 3
     jmp 1
     %3:
     syscall 1 0 =fizzm
-    u8.ld =idx
-    u8.const 5
-    u8.mod
+    i32.ld =idx
+    i32.const 5
+    i32.mod
     jze 4
     jmp 1
     %4:
     syscall 1 0 =buzzm
     
     %1:
-    u8.ld =idx
+    i32.ld =idx
     extern <fmw.num>
-    u8.ld =idx
-    u8.ld =idx
-    u8.inc
-    u8.sto =idx
-    u8.const =to
-    u8.cmpeq
+    i32.ld =idx
+    i32.ld =idx
+    i32.inc
+    i32.sto =idx
+    i32.const =to
+    i32.cmpeq
     jze =loop
 
   
-    u8.ld =idx
-    u8.halt
+    i32.ld =idx
+    i32.halt
   .end)
 ))

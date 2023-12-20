@@ -5,19 +5,13 @@ This machine can compile KTRO Packages to run with JS.
 * PROJECT WILL BE FINISHED & READY IN 2024
 
 * Todo:
-  - Add support for signed numbers
-  - Add support for 32 and 64 bit ints,
   - Add support for 32 and 64 bit floats,
-  - Add a data section
   - Ability to call standard library functions
-  - Jumps and functions
-  - Entry function
   - Support some Javascript libs like WebGL, Express, etc
 
-As of now, only use bin type 0xA1 as its the only supported bin type.
+As of now, only use bin type 0xA2 as its the only supported bin type.
 */
 
-import { executionAsyncResource } from "async_hooks";
 import * as fs from "fs";
 
 export const PackageProgram = (output, program) => {
@@ -44,6 +38,12 @@ export const VirtualMemoryBuffer = (sizeInBytes) => {
 };
 
 export const imm16 = (word) => [(word >> 8) & 0xff, word & 0xff];
+export const imm32 = (dword) => [
+  (dword >>> 24) & 0xff,
+  (dword >>> 16) & 0xff,
+  (dword >>> 8) & 0xff,
+  dword & 0xff
+];
 
 export const SECTION = 0xfa;
 
@@ -77,9 +77,9 @@ export const POPL = 0x2a;
 export const DEL = 0x3a;
 export const DUP = 0x4a;
 export const LDR = 0x6a;
-export const LDAZ = 0x7a;
-export const HLTS = 0x8a;
-export const HLTF = 0x9a;
+export const LDD = 0x7a;
+export const SF = 0x8a;
+export const CSF = 0x9a;
 export const SUB = 0xaa;
 export const MUL = 0xba;
 export const DIV = 0xca;
@@ -108,10 +108,16 @@ export const NOT = 0x1c;
 export const NOR = 0x2c;
 export const CALL = 0x4c;
 export const RET = 0x5c;
+export const STD = 0x6c;
 
 export const U8 = 8;
 export const U16 = 16;
 export const U32 = 32;
+
+export const Integer8 = U8;
+export const Integer16 = U16;
+export const Integer32 = U32;
+
 export const VOID = 0;
 
 export const SYSINT = {
@@ -376,7 +382,8 @@ export class KtroVirtualMachine {
     this.USE_FLAGS = false;
     this.ZERO_FLAG = false;
     this.NEG_FLAG = false;
-
+    this.SIGNED_FLAG = false;
+    
     this.STDOUT = 0;
     this.STDIN = 1;
 
@@ -526,6 +533,17 @@ export class KtroVirtualMachine {
     }
   }
 
+  signedToUnsigned(value, bitlength) {
+    if (value & (1 << (bitlength - 1))) {
+      return value - (1 << bitlength);
+    }
+    return value;
+  }
+
+  unsignedToSigned(value, bitlength) {
+    return value % (1 << bitlength);
+  }
+  
   lastResultTruthy() {
     if (this.USE_FLAGS) {
       return this.ZERO_FLAG;
@@ -590,6 +608,8 @@ export class KtroVirtualMachine {
         return this.heapStoreImm8(offset, value);
       case 16:
         return this.heapStoreImm16(offset, value);
+      case 32:
+        return this.heapStoreImm32(offset, value);
     }
     console.error(`heapStoreAuto: invalid size ${size}`);
     return;
@@ -601,29 +621,64 @@ export class KtroVirtualMachine {
         return this.heapLoad8(addr);
       case 16:
         return this.heapLoad16(addr);
+      case 32:
+        return this.heapLoad32(addr);
     }
     console.error(`heapLoadAuto: invalid size ${size}`);
     return;
   }
 
+
   heapStoreImm16(addr, value) {
     this.setRegister("rhp", addr + 1);
+
+    if (this.SIGNED_FLAG === 1) {
+      return this.memory.setInt16(addr, value);
+    }
     this.memory.setUint16(addr, value);
   }
 
   heapStoreImm8(addr, value) {
     this.setRegister("rhp", addr);
+
+    if (this.SIGNED_FLAG === 1) {
+      return this.memory.setInt8(addr, value);
+    }
     this.memory.setUint8(addr, value);
   }
+  
+  heapStoreImm32(addr, value) {
+    this.setRegister("rhp", addr + 3);
 
+    if (this.SIGNED_FLAG === 1) {
+      return this.memory.setInt32(addr, value);
+    }
+    this.memory.setUint32(addr, value);
+  }
+  
+  heapLoad32(addr) {
+    if (this.SIGNED_FLAG === 1) {
+      return this.memory.getInt32(addr);
+    }
+    return this.memory.getUint32(addr);
+  }
+  
   heapLoad16(addr) {
+
+    if (this.SIGNED_FLAG === 1) {
+      return this.memory.getInt16(addr);
+    }
     return this.memory.getUint16(addr);
   }
 
   heapLoad8(addr) {
+
+    if (this.SIGNED_FLAG === 1) {
+      return this.memory.getInt8(addr);
+    }
     return this.memory.getUint8(addr);
   }
-
+  
   fetch() {
     const nextInstructionAddress = this.getRegister("rip");
     const instruction = this.memory.getUint8(nextInstructionAddress);
@@ -730,13 +785,22 @@ export class KtroVirtualMachine {
     let topOfStack = this.getRegister("rsp") - size / 8;
     switch (size) {
       case 8:
-        this.memory.setUint8(topOfStack, value);
+        if (this.SIGNED_FLAG === 1)
+          this.memory.setInt8(topOfStack, value);
+        else 
+          this.memory.setUint8(topOfStack, value);
         break;
       case 16:
-        this.memory.setUint16(topOfStack, value);
+        if (this.SIGNED_FLAG === 1)
+          this.memory.setInt16(topOfStack, value);
+        else 
+          this.memory.setUint16(topOfStack, value);
         break;
       case 32:
-        this.memory.setUint32(topOfStack, value);
+        if (this.SIGNED_FLAG === 1)
+          this.memory.setInt32(topOfStack, value);
+        else 
+          this.memory.setUint32(topOfStack, value);
         break;
       default:
         console.error(`push: invalid size '${size}' (value ${value})`);
@@ -761,24 +825,42 @@ export class KtroVirtualMachine {
     var value;
     switch (size) {
       case 8: {
-        value = this.memory.getUint8(topOfStack);
-        this.memory.setUint8(topOfStack, 0);
+        if (this.SIGNED_FLAG === 1){
+          value = this.memory.getInt8(topOfStack);
+          this.memory.setInt8(topOfStack, 0);
+        } else {
+          value = this.memory.getUint8(topOfStack);
+          this.memory.setUint8(topOfStack, 0);
+        }
         break;
       }
       case 16: {
-        value = this.memory.getUint16(topOfStack);
-        this.memory.setUint16(topOfStack, 0);
+        if (this.SIGNED_FLAG === 1){
+          value = this.memory.getInt16(topOfStack);
+          this.memory.setInt16(topOfStack, 0);
+        } else {
+          value = this.memory.getUint16(topOfStack);
+          this.memory.setUint16(topOfStack, 0);
+        }
         break;
       }
       case 32: {
-        value = this.memory.getUint32(topOfStack);
-        this.memory.setUint32(topOfStack, 0);
+        if (this.SIGNED_FLAG === 1) {
+          value = this.memory.getInt32(topOfStack);
+          this.memory.setInt32(topOfStack, 0);
+        } else { 
+          value = this.memory.getUint32(topOfStack);
+          this.memory.setUint32(topOfStack, 0);
+        }
         break;
       }
       default:
         console.error(`pop (retrieve): invalid size '${size}'`);
     }
     this.setRegister("rsp", topOfStack + size / 8);
+    if (this.SIGNED_FLAG > 0) {
+      this.SIGNED_FLAG = 0
+    }
     return value;
   }
 
@@ -801,7 +883,7 @@ export class KtroVirtualMachine {
       case NOP: {
         return;
       }
-
+        
       case INC: {
         const size = this.fetch();
         const item = this.pop(size);
@@ -853,6 +935,15 @@ export class KtroVirtualMachine {
         return;
       }
 
+      case SF: {
+        this.SIGNED_FLAG = 1;
+        return;
+      }
+      case CSF: {
+        this.SIGNED_FLAG = 0;
+        return;
+      }
+        
       case CZF: {
         this.ZERO_FLAG = 0;
         return;
@@ -904,9 +995,19 @@ export class KtroVirtualMachine {
         return;
       }
 
+      case STD: {
+        const size = this.fetch();
+        const value = this.pop(size);
+        const offset = this.pop(size);
+        const address = this.offsetAsHeapAddress(offset);
+        this.heapStoreAuto(size, address, value);
+        return;
+      }
+
       case DB: {
         const size = this.fetch();
         this.hoffset += size;
+        return;
       }
 
       case ERASE: {
@@ -928,6 +1029,15 @@ export class KtroVirtualMachine {
         return;
       }
 
+      case LDD: {
+        const size = this.fetch();
+        const offset = this.pop(size);
+        const address = this.offsetAsHeapAddress(offset);
+        const value = this.heapLoadAuto(size, address);
+        this.push(size, value);
+        return;
+      }
+        
       case DEL: {
         const size = this.fetch();
         const offset = this.fetch();

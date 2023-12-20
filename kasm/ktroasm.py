@@ -1,10 +1,19 @@
 from lark import Lark, Tree, Visitor, Token
 from sys import argv
 
+def unsigned_to_signed(value, bl):
+  if value & (1 << (bl - 1)):
+      return value - (1 << bl)
+  else:
+      return value
+
+def signed_to_unsigned(value, bl):
+  return value % (1 << bl)
 
 class Processor(Visitor):
   OPCODES = {
-    "u8": 8, "u16": 16,
+    "null": 0x00, "__void__": 0x00,
+    "u8": 8, "u16": 16, "u32": 32, "i8": 8, "i16": 16, "i32": 32,
     "section": 0xfa, "binary": 0x01, "syscall": 0x02, "interrupt": 0x02,
     "meta": 0x03, "func": 0x06, "label": 0x07,
     "const": 0x10, "add": 0x11, "halt": 0x12, "hlt": 0x12,
@@ -16,11 +25,13 @@ class Processor(Visitor):
     "jze": 0x8b, "jne": 0x8b, "call": 0x4c, "ret": 0x5c, "offset": 0xbb,
     "and": 0xcb, "or": 0xdb, "shl": 0xec, "shr": 0xfc, "xor": 0x0c, 
     "not": 0x1c, "nor": 0x2c, "inc": 0x0b, "dec": 0x1b, "dup": 0x4a,
-    "mod": 0x2b,
+    "mod": 0x2b, "sf": 0x8a, "csf": 0x9a, "std": 0x6c, "ldd": 0x7a,
+    "ldsd": 0x7a, "stsd": 0x6c, "ldat": 0x7a, "stat": 0x6c
   }
   
   def __init__(self):
     super().__init__()
+
     self.opcodes = [0x70, 0x6b, 0x67]
     self.data_opcodes = []
     self.labels = {}
@@ -118,10 +129,34 @@ class Processor(Visitor):
   def inst_typed(self, tree: Tree):
     size = str(tree.children.pop(0))
     inst = str(tree.children.pop(0))
+    is_signed = size[0] == 'i'
+    if (is_signed):
+      self.emit(["sf"])
+      
+    op_size = self.OPCODES[size]
+    
     self.emit([inst, size])
-
-    operands = [int(str(self.visit(op))) for op in tree.children]
-    self.emit(operands)
+    operands = []
+    for op in tree.children:
+      num = int(str(self.visit(op)))
+      match op_size:
+        case 8:
+          operands.append(num & 0xff)
+        case 16:
+          operands.extend([
+            (num >> 8) & 0xff, 
+            (num & 0xff)])
+        case 32:
+          operands.extend([
+            (num >> 24) & 0xff,
+            (num >> 16) & 0xff,
+            (num >> 8)  & 0xff,
+            (num)       & 0xff
+          ])
+        case _:
+          print(f"error: invalid size {size}")
+    if len(operands) > 0:
+      self.emit(operands)
     return tree
     
   def operand_ref(self, tree: Tree):
@@ -142,7 +177,8 @@ class Processor(Visitor):
       return int(self.labels[second])
       
   def operand_imm(self, tree: Tree):
-    return self.visit(tree.children[0])
+    op = int(str(self.visit(tree.children[0])))
+    return op
 
   def doffset(self, tree: Tree):
     align = int(str(self.visit(tree.children.pop(0))))
@@ -238,6 +274,12 @@ class Processor(Visitor):
       
       num = str(int(num[2:], 16))
     return int(num)
+
+  def unary_pos(self, tree: Tree):
+    return int(str(self.visit(tree.children[0])))
+
+  def unary_neg(self, tree: Tree):
+    return int(str(self.visit(tree.children[0]))) * -1
     
 if __name__ == "__main__":
   if (len(argv) < 2):
@@ -262,4 +304,4 @@ if __name__ == "__main__":
     result = proc.visit(tree)
     proc.package_to_file()
   except KeyError as e:
-    print(f"error: undefined label '{e.args[0]}'")
+    print(f"error: invalid opcode for '{e.args[0]}'")
