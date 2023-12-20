@@ -2,7 +2,6 @@
 ** THIS FILE IS NOT AN EXAMPLE ON HOW TO USE THE KVM **
 This file is used for debugging & testing.
 */
-import {exec} from "child_process";
 
 import * as readlineSync  from "readline-sync";
 import * as exports from "./ktro.js"

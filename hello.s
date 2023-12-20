@@ -1,17 +1,10 @@
 (package (.data 0) (
-  .extern 0 $lib (1 $prompt)
   .offset 1
+  .asciz ("Hello, world!" 10) $hello
   
   .func (0 $entry) (
-    i32.const 1
-    extern <lib.prompt>
-    i32.sto 0xff
-    i32.ld 0xff
-    i32.const 1
-    i32.add 
-    i32.const 69
-    i32.stat
-    i32.ld 0xff
+    syscall 1 0 =hello
+    i32.const 0
     i32.halt
   .end)
 ))

@@ -126,6 +126,22 @@ export const SYSINT = {
   READ: 2,
 };
 
+export const StandardNamespace = {
+  namespaceID: 0,
+  jsFunctions: [
+    (kvm) => {
+      let offset = kvm.getArgument(Integer32);
+      let buf = readlineSync.question("");
+      kvm.storeStringToHeap(offset, buf);
+      return kvm.resultValue(buf.length, Integer32);
+    },
+  ]
+};
+
+export const VirtualMemoryBufferAuto = () => {
+  return VirtualMemoryBuffer(1024 * 1024);
+}
+
 export class KtroPreproccessor {
   constructor(buffer, mem_start) {
     this.buffer = buffer;

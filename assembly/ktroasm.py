@@ -1,4 +1,5 @@
 from lark import Lark, Tree, Visitor, Token
+from os import path
 from sys import argv
 
 def unsigned_to_signed(value, bl):
@@ -280,13 +281,16 @@ class Processor(Visitor):
 
   def unary_neg(self, tree: Tree):
     return int(str(self.visit(tree.children[0]))) * -1
-    
+
+
+current_dir = path.dirname(path.abspath(__file__))
+
 if __name__ == "__main__":
   if (len(argv) < 2):
     print(f"usage: {argv[0]} <file>")
     exit(1)
     
-  gf = open("./ktroasm/gram.g", "r")
+  gf = open(path.join(current_dir, "gram.g"), "r")
   grammar = gf.read()
   gf.close()
 
