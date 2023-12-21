@@ -1,13 +1,19 @@
 {
   "name": "ktro",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "",
   "main": "ktro.js",
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["vm", "virtualmachine", "ktro", "wasm", "asm"],
+  "keywords": [
+    "vm",
+    "virtualmachine",
+    "ktro",
+    "wasm",
+    "asm"
+  ],
   "author": "jxvz iyc",
   "license": "ISC",
   "dependencies": {
