@@ -1,14 +1,14 @@
 {
-  "name": "nodejs",
+  "name": "ktro",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "ktro.js",
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["vm", "virtualmachine", "ktro", "wasm", "asm"],
+  "author": "jxvz iyc",
   "license": "ISC",
   "dependencies": {
     "@types/node": "^18.0.6",

@@ -13,7 +13,7 @@ As of now, only use bin type 0xA2 as its the only supported bin type.
 */
 
 import * as fs from "fs";
-
+import * as readlineSync  from "readline-sync";
 export const PackageProgram = (output, program) => {
   return fs.writeFileSync(output, Buffer.from(program));
 };

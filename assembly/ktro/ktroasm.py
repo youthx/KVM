@@ -1,6 +1,7 @@
 from lark import Lark, Tree, Visitor, Token
 from os import path
 from sys import argv
+from .gram import GRAMMAR
 
 def unsigned_to_signed(value, bl):
   if value & (1 << (bl - 1)):
@@ -285,17 +286,13 @@ class Processor(Visitor):
 
 current_dir = path.dirname(path.abspath(__file__))
 
-if __name__ == "__main__":
+def main():
   if (len(argv) < 2):
     print(f"usage: {argv[0]} <file>")
     exit(1)
-    
-  gf = open(path.join(current_dir, "gram.g"), "r")
-  grammar = gf.read()
-  gf.close()
 
   # Create a parser
-  parser = Lark(grammar, parser='lalr')
+  parser = Lark(GRAMMAR, parser='lalr')
 
   # Parse an expression
   f = open(argv[1], "r")

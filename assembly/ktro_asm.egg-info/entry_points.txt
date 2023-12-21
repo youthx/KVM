@@ -1,0 +1,2 @@
+[console_scripts]
+ktroasm = ktro_asm.ktroasm:main
